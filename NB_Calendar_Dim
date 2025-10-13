@@ -1,0 +1,56 @@
+Calendar Dimension Table
+
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import (
+    col, lit, year, month, dayofmonth, dayofweek, weekofyear, quarter,
+    date_format, expr, when
+)
+from datetime import datetime, timedelta
+
+# --------------------------
+# CONFIG
+# --------------------------
+start_date = datetime(2022, 1, 1)   # Calendar start
+end_date   = datetime(2024, 12, 31) # Calendar end
+
+# --------------------------
+# GENERATE DATE RANGE
+# --------------------------
+# Create a list of dates
+date_list = [
+    (start_date + timedelta(days=x))
+    for x in range((end_date - start_date).days + 1)
+]
+
+# Convert to DataFrame
+dates_df = spark.createDataFrame(date_list, "date").toDF("Date")
+
+# --------------------------
+# ADD DATE ATTRIBUTES
+# --------------------------
+calendar_df = (
+    dates_df
+    .withColumn("DateKey", date_format(col("Date"), "yyyyMMdd").cast("int"))
+    .withColumn("Year", year(col("Date")))
+    .withColumn("Month_Number", month(col("Date")))
+    .withColumn("MonthName", date_format(col("Date"), "MMMM"))
+    .withColumn("Month_Short", date_format(col("Date"), "MMM"))
+    .withColumn("Quarter", quarter(col("Date")))
+    .withColumn("Day", dayofmonth(col("Date")))
+    .withColumn("DayOfWeek", dayofweek(col("Date")))                # 1 = Sunday, 7 = Saturday
+    .withColumn("DayName", date_format(col("Date"), "EEEE"))
+    .withColumn("Year_Month", date_format(col("Date"), "yyyy-MMM"))
+    .withColumn("WeekOfYear", weekofyear(col("Date")))
+    .withColumn("IsWeekend", when(col("DayOfWeek").isin(1, 7), lit(1)).otherwise(lit(0)))
+)
+
+# --------------------------
+# WRITE TO GOLD LAYER
+# --------------------------
+calendar_df.write.mode("overwrite").parquet("Files/Gold_calendar/DimCalendar")
+
+# --------------------------
+# DISPLAY SAMPLE
+# --------------------------
+display(calendar_df.limit(10))
+
