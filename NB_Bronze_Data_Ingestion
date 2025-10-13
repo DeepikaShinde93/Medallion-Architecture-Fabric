@@ -1,0 +1,141 @@
+What This Code Does
+This part of the notebook handles automated data ingestion from a GitHub folder into the Lakehouse in Microsoft Fabric. It includes a simple check to avoid processing the same files more than once.
+
+The Goal
+The goal is to fetch all the CSV files from a specific folder in a GitHub repository and save each one individually in the Lakehouse as Parquet files. At the same time, we want to avoid re-ingesting files that have already been processed.
+
+How It Works
+The code connects to GitHub and lists all files in the given folder, like "Structured".
+For each file in that list:
+It checks if a corresponding folder already exists in the Lakehouse, such as /Files/Bronze/Structured/orders/ for orders.csv.
+If the folder is found, we assume the file has already been ingested, and it is skipped.
+If the folder is not found, the file is treated as new. The code downloads it, adds metadata like filename and ingestion timestamp, and saves it as a Parquet file in the appropriate Lakehouse location.
+Why This Is Useful
+This approach keeps the data ingestion clean and efficient. It prevents duplicates, requires no hardcoding of file names, and makes the notebook safe to run multiple times without reprocessing already ingested files.
+
+What Happens On Future Runs
+When the notebook is run again:
+
+New files in the GitHub folder will be ingested
+Files that have already been processed will be skipped
+This setup provides a solid foundation for automating ingestion. In the future, additional logic can be added to detect if a file’s content has changed, and only reprocess it when necessary.
+
+
+# STEP 1: Imports
+import requests
+import pandas as pd
+from datetime import datetime
+from pyspark.sql.functions import lit
+from pyspark.sql.functions import concat,col
+
+# STEP 2: GitHub info
+GITHUB_USERNAME = "DeepikaShinde93"
+GITHUB_TOKEN = "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"
+REPO = "Medallion-Architecture-Fabric"
+FOLDER = "ShoppingMart_StructuredData"
+api_url = f"https://api.github.com/repos/DeepikaShinde93/Medallion-Architecture-Fabric/contents/ShoppingMart_StructuredData" #always remember to use contents in folder URL
+response = requests.get(api_url, auth=(GITHUB_USERNAME, GITHUB_TOKEN)) #HTTP request to get the files from the Git
+files = response.json() #it will create a list of all the files avalilable in the structured data folder
+
+
+# STEP 4: Loop through files and process only new ones
+for file in files:
+    filename = file['name'] #This will get the files from the json file one by one
+    
+    # Only process CSVs (adjust if needed)
+    if not filename.endswith('.csv'):
+        continue
+
+    file_url = file['download_url'] #This will get the download URL of the files from the json file one by one 
+    file_name_no_ext = filename.replace('.csv', '') #removing extention from the file
+    parquet_path = f"Files/Bronze/Structured/{file_name_no_ext}/" #this will create a path in the Files of lakehouse and store the files there
+
+    # STEP 5: Check if folder already exists in Lakehouse
+    try:
+        # Try to read existing data from Lakehouse folder
+        spark.read.parquet(parquet_path).limit(1)
+        print(f"Skipping '{filename}' — already ingested.")
+        continue  # Skip this file
+    except Exception as e:
+        # Folder doesn't exist yet → proceed to ingest
+        print(f"Ingesting '{filename}' — new file.")
+
+    # STEP 6: Download and process the file
+    ingestion_time = datetime.utcnow().isoformat()
+    df = pd.read_csv(file_url)
+    sdf = spark.createDataFrame(df)
+
+    # # Add metadata
+    # sdf = sdf.withColumn("filename", lit(filename))
+    # sdf = sdf.withColumn("ingestion_date", lit(ingestion_time))
+
+    dynamic_file_name = "filename_" + file_name_no_ext
+    dynamic_ingestion_date = "ingestion_date_" + file_name_no_ext
+    sdf = sdf.withColumn(dynamic_file_name, lit(filename))
+    sdf = sdf.withColumn(dynamic_ingestion_date, lit(ingestion_time))
+
+    # STEP 7: Save as single Parquet file (overwrite mode)
+    sdf.coalesce(1).write.mode("overwrite").parquet(parquet_path)
+
+    print(f"Successfully ingested: {filename}")
+
+Ingestion of Unstructured Files
+# STEP 1: Imports
+import requests
+import pandas as pd
+from datetime import datetime
+from pyspark.sql.functions import lit
+from notebookutils import mssparkutils
+
+# STEP 2: GitHub info
+GITHUB_USERNAME = "DeepikaShinde93"
+GITHUB_TOKEN = "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"
+REPO = "Medallion-Architecture-Fabric"
+FOLDER = "ShoppingMart_UnstructuredData"
+api_url = f"https://api.github.com/repos/DeepikaShinde93/Medallion-Architecture-Fabric/contents/ShoppingMart_UnstructuredData"
+response = requests.get(api_url, auth=(GITHUB_USERNAME, GITHUB_TOKEN))
+files = response.json()
+
+from datetime import datetime
+from notebookutils import mssparkutils
+from pyspark.sql.functions import lit
+import pandas as pd
+
+for file in files:
+    filename = file['name']
+    
+    if not filename.endswith('.json'):
+        continue
+
+    file_url = file['download_url']
+    file_name_no_ext = filename.replace('.json', '')
+    folder_path = f"Files/Bronze/Unstructured/{file_name_no_ext}/"
+
+    # Skip if already ingested
+    if mssparkutils.fs.exists(folder_path):
+        print(f"Skipping '{filename}' — already ingested.")
+        continue
+
+    print(f"Ingesting '{filename}' — new file.")
+
+    # FIXED: Handle NDJSON using lines=True
+    try:
+        df = pd.read_json(file_url, lines=True)
+    except Exception as e:
+        print(f"Failed to read JSON file: {filename} — {str(e)}")
+        continue
+
+    sdf = spark.createDataFrame(df)
+
+    # Add metadata
+    ingestion_time = datetime.utcnow().isoformat()
+    dynamic_file_name = "filename_" + file_name_no_ext
+    dynamic_ingestion_date = "ingestion_date_" + file_name_no_ext
+    sdf = sdf.withColumn(dynamic_file_name, lit(filename))
+    sdf = sdf.withColumn(dynamic_ingestion_date, lit(ingestion_time))
+
+    # Save as Parquet
+    sdf.coalesce(1).write.mode("overwrite").parquet(folder_path)
+
+    print(f"Successfully ingested: {filename}")
+
