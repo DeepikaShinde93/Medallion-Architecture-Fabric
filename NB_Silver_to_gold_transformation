@@ -1,0 +1,43 @@
+Gold Layer Notebook:Transformations and Data Integration
+
+from pyspark.sql.functions import *
+orders_df=spark.read.parquet("Files/Silver_orders_data/ShoppingMart_customers_orderdata")
+
+reviews_data_df=spark.read.parquet("Files/Silver_reviews_data/Silver_reviews")
+social_media_df=spark.read.parquet("Files/Silver_social_media/Silver_social_media")
+web_logs_data_df=spark.read.parquet("Files/Silver_web_logs_data/Silver_web_logs")
+display(reviews_data_df)
+
+#Aggregating the data of web logs on User,page and action
+from pyspark.sql.functions import initcap
+web_logs_data_df=spark.read.parquet("Files/Silver_web_logs_data/Silver_web_logs")
+web_logs_data_df=web_logs_data_df.groupBy('user_id','page','action').count()
+web_logs_data_df = web_logs_data_df \
+    .withColumnRenamed('user_id', 'UserID') \
+    .withColumnRenamed('page', 'Page') \
+    .withColumnRenamed('action', 'Action')
+web_logs_data_df = web_logs_data_df.withColumn('Action',initcap('Action'))\
+                                   .withColumn('Page',initcap('Page'))
+web_logs_data_df.write.mode("overwrite").parquet("Files/Gold_web_logs_data/Gold_web_logs")
+# display(web_logs_data_df)
+
+#Aggregating the data of social_media_df on User,page and action
+from pyspark.sql.functions import initcap
+social_media_df=spark.read.parquet("Files/Silver_social_media/Silver_social_media")
+social_media_df=social_media_df.groupBy('platform','sentiment').count()
+social_media_df=social_media_df.withColumn('sentiment',initcap('sentiment'))
+social_media_df=social_media_df.withColumnRenamed('platform','Platform')\
+                               .withColumnRenamed('sentiment','Sentiment')\
+                               .withColumnRenamed('count','Count')
+social_media_df.write.mode("overwrite").parquet("Files/Gold_social_media/Gold_social_media")
+# display(social_media_df)
+
+from pyspark.sql.functions import avg
+reviews_data_df=spark.read.parquet("Files/Silver_reviews_data/Silver_reviews")
+reviews_data_df=reviews_data_df.groupBy("product_id").agg(avg("rating").alias('avg_rating'))
+reviews_data_df=reviews_data_df.withColumnRenamed("product_id",'ProductID')\
+                            .withColumnRenamed("avg_rating",'Avg_Ratings')
+reviews_data_df.write.mode("overwrite").parquet("Files/Gold_reviews_data/Gold_reviews")
+# display(reviews_data_df)
+
+orders_df.write.mode("overwrite").parquet("Files/Gold_orders_data/ShoppingMart_customers_orderdata")
