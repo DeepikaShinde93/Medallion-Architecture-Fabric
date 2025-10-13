@@ -1,0 +1,34 @@
+Silver Layer Notebook:Transformations & Integration
+
+Load Bronze Data
+
+from pyspark.sql.functions import *
+df_customers=spark.read.format('parquet').option('header',True).load('Files/Bronze/Structured/customers')
+df_orders=spark.read.format('parquet').option('header',True).load('Files/Bronze/Structured/Orders_Data')
+df_products=spark.read.format('parquet').option('header',True).load('Files/Bronze/Structured/products')
+
+
+df_orders=df_orders.dropna(subset=["OrderID","CustomerID","ProductID","OrderDate","TotalAmount"])
+df_orders=df_orders.withColumn("OrderDate",to_date("OrderDate"))
+
+df_orders=df_orders\
+         .join(df_customers,"CustomerID","inner")\
+         .join(df_products,"ProductID","inner")
+
+
+#Removing duplicate 'Ingestion_Date columns' from the dataframe
+columns_to_drop = ["ingestion_date_customers", "ingestion_date_products"]
+df_clean = df_orders.drop(*columns_to_drop)
+df_orders = df_clean.withColumnRenamed("ingestion_date_Orders_Data", "ingestion_date")
+df_orders=df_orders.withColumn("ingestion_date",to_date("ingestion_date"))
+df_orders=df_orders.withColumn("SignupDate",to_date("SignupDate"))
+
+df_orders.write.mode("overwrite").parquet("Files/Silver/Structured/Silver_orders_data/ShoppingMart_customers_orderdata")
+
+df_reviews=spark.read.parquet('Files/Bronze/Unstructured/reviews')
+df_social_media=spark.read.parquet('Files/Bronze/Unstructured/social_media')
+df_web_logs=spark.read.parquet('Files/Bronze/Unstructured/web_logs')
+
+df_reviews.write.mode("overwrite").parquet('Files/Silver/Unstructured/Silver_reviews_data/Silver_reviews')
+df_social_media.write.mode("overwrite").parquet('Files/Silver/Unstructured/Silver_social_media/Silver_social_media')
+df_web_logs.write.mode("overwrite").parquet('Files/Silver/Unstructured/Silver_web_logs_data/Silver_web_logs')
